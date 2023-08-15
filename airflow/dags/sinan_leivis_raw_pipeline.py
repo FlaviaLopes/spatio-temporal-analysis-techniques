@@ -114,11 +114,13 @@ def csv_to_parquet():
 
 def get_parquet_schema():
     import pyarrow.parquet as pq
+    import json
     local_data_path = '/usr/local/airflow/dags/data'
     p = pq.read_table(os.path.join(local_data_path, 'processing', 'sinan_leivis', '2007_2020_leivis.parquet'))
     schema = p.schema
     schema = [dict(zip(["name", "type"], it)) for it in [it.split(": ") for it in str(schema).split('\n')][:75]]
     _ = [it.update({'mode': 'NULLABLE'}) for it in schema]
+    schema = json.dumps(schema)
     return schema
 
 
@@ -274,75 +276,6 @@ delete_processing_bucket = GCSDeleteBucketOperator(
     gcp_conn_id=GCP_CONN_ID,
     dag=dag
 )
-
-# [start SPARK - usar spark na parte de mineração/outros]
-DATAPROC_CLUSTER_NAME = getenv('DATAPROC_CLUSTER_NAME', 'leivis-cluster')
-PYSPARK_URI = getenv('PYSPARK_URI', '')
-dp_cluster_config = {
-    "master_config": {
-        "num_instances": 1,
-        "machine_type_uri": "n1-standard-2",
-        "disk_config": {
-            "boot_disk_type": "pd_standard",
-            "boot_disk_size_gb": 100,
-        },
-        "worker_config": {
-            "num_instances": 2,
-            "machine_type_uri": "n1-standard-2",
-            "disk_config": {
-                "boot_disk_type": "pd_standard",
-                "boot_disk_size_gb": 100,
-            },
-        }
-    }
-}
-
-create_dataproc_cluster = DataprocCreateClusterOperator(
-    task_id='create_dataproc_cluster',
-    project_id=GCP_PROJECT_ID,
-    cluster_name=DATAPROC_CLUSTER_NAME,
-    cluster_config=dp_cluster_config,
-    region=REGION,
-    use_if_exists=True,
-    gcp_conn_id=GCP_CONN_ID,
-    dag=dag
-)
-
-pyspark_job = {
-    "reference": {"project_id": GCP_PROJECT_ID},
-    "placement": {"cluster_name": DATAPROC_CLUSTER_NAME},
-    "pyspark_job": {"main_python_file_uri": PYSPARK_URI},
-}
-
-pyspark_job_submit = DataprocSubmitJobOperator(
-    task_id='pyspark_job_submit',
-    project_id=GCP_PROJECT_ID,
-    region=REGION,
-    job=pyspark_job,
-    asynchronous=True,
-    gcp_conn_id=GCP_CONN_ID,
-    dag=dag
-)
-
-dataproc_job_sensor = DataprocJobSensor(
-    task_id='dataproc_job_sensor',
-    project_id=GCP_PROJECT_ID,
-    region=REGION,
-    dataproc_job_id={"{{task_instance.xcom_pull(task_ids='pyspark_job_submit')}}"},
-    poke_interval=30,
-    gcp_conn_id=GCP_CONN_ID,
-    dag=dag
-)
-
-delete_dataproc_cluster = DataprocDeleteClusterOperator(
-    task_id='delete_dataproc_cluster',
-    project_id=GCP_PROJECT_ID,
-    region=REGION,
-    cluster_name=DATAPROC_CLUSTER_NAME,
-    gcp_conn_id=GCP_CONN_ID,
-    dag=dag
-)
-# [end SPARK]
 
 (start >>
  list_raw_sinan_leivis >>
