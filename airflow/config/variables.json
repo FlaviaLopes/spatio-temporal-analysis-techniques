@@ -1,0 +1,15 @@
+{
+    "JAVA_HOME": "/usr",
+    "R_HOME": "/usr/local/lib",
+    "AMBIENTE": "DEV",
+    "GCP_PROJECT_ID": "leivis",
+    "GCP_CONN_ID": "gcp-gcs",
+    "REGION": "us-east1",
+    "LOCATION": "us-east1",
+    "RAW_BUCKET": "raw_leivisproject",
+    "PROCESSING_BUCKET": "processing_leivisproject",
+    "BQ_DATASET_NAME": "bq_leivis",
+    "BQ_SINAN_TABLE_NAME": "sinan_leivis",
+    "BQ_TCU_POP_TABLE_NAME": "tcu_population",
+    "BQ_IBGE_MUN_TABLE_NAME": "ibge_counties"
+}

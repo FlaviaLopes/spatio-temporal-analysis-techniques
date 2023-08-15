@@ -1,0 +1,54 @@
+version: '3'
+
+networks:
+  net:
+    driver: bridge
+
+services:
+  postgres:
+    image: postgres:14
+    container_name: postgres
+    restart: unless-stopped
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+    networks:
+      - net
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_USER=flavia123
+      - POSTGRES_PASSWORD=flavia@123
+      - POSTGRES_DB=leivis
+      - PGDATA=/var/lib/postgresql/data
+
+  airflow:
+    image: ferrettivinicius/airflow-aula-fia:latest
+    hostname: airflow
+    container_name: airflow
+    depends_on:
+      - postgres
+    volumes:
+        - ./airflow/dags:/usr/local/airflow/dags
+        - ./airflow/jars:/usr/local/airflow/jars
+        - ./airflow/config:/usr/local/airflow/config
+        - ./airflow/plugins:/usr/local/airflow/plugins
+        - ./airflow/logs:/usr/local/airflow/logs
+        - ./airflow/requirements.txt:/requirements.txt
+    networks:
+        - net
+    ports:
+        - 8081:8080
+    command:
+      - bash -c "pip install -r requirements.txt && airflow webserver"
+
+  jupyter:
+    image: jupyter/pyspark-notebook:spark-3.2.1
+    hostname: jupyter
+    container_name: jupyter
+    ports:
+      - 8888:8888
+    networks:
+      - net
+    volumes:
+      - ./jupyter/notebooks:/home/jovyan/notebooks
+      - ./jupyter/jars:/home/jovyan/jars

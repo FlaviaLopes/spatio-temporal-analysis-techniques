@@ -1,0 +1,7 @@
+.idea
+./airflow/dags/__pycache__
+./airflow/dags/data/raw/sinan_leivis/*
+./airflow/dags/data/raw/sinan_leivis/*
+./airflow/logs/*/*.log
+./jupyter/notebooks/data
+

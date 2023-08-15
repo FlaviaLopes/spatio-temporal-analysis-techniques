@@ -1,0 +1,12 @@
+{
+  "spark_local": {
+    "conn_type": "spark",
+    "description": "Spark Local",
+    "login": "",
+    "password": null,
+    "host": "local[1]",
+    "port": null,
+    "schema": "",
+    "extra": ""
+  }
+}
