@@ -80,16 +80,7 @@ def sync_blob_to_local(**kwargs):
 def csv_to_parquet():
     local_data_path = '/usr/local/airflow/dags/data'
     files = os.listdir(os.path.join(local_data_path, 'processing', 'sinan_leivis'))
-    data = pd.DataFrame()
-
-    for it in files:
-        data = pd.concat([
-            data,
-            pd.read_csv(
-                os.path.join(local_data_path, 'processing', 'sinan_leivis', it),
-                encoding='latin1',
-                low_memory=False)
-        ], axis=0)
+    files = [it for it in files if '.csv' in it]
 
     to_float = ['TP_NOT', 'SG_UF_NOT', 'CS_GESTANT', 'CS_RACA', 'CS_ESCOL_N', 'SG_UF', 'ID_PAIS', 'NDUPLIC_N',
                 'CS_FLXRET', 'FLXRECEBI', 'MIGRADO_W', 'FEBRE', 'FRAQUEZA', 'EDEMA', 'EMAGRA',
@@ -104,23 +95,35 @@ def csv_to_parquet():
     to_date = ['DT_NOTIFIC', 'DT_SIN_PRI', 'DT_NASC', 'DT_INVEST', 'TRATAMENTO', 'DT_OBITO', 'DT_ENCERRA', 'DT_DESLC1',
                'DT_DESLC2', 'DT_DESLC3']
 
-    data[to_float] = data[to_float].astype(float)
-    data[to_str] = data[to_str].astype(str)
-    data[to_date] = data[to_date].astype(str)
-    data = data[to_float + to_str + to_date]
-    data.to_parquet(os.path.join(local_data_path, 'processing', 'sinan_leivis', '2007_2020_leivis.parquet'))
+    for it in files:
+        data = pd.read_csv(
+            os.path.join(local_data_path, 'processing', 'sinan_leivis', it),
+            encoding='latin1',
+            low_memory=False
+        )
+        data[to_float] = data[to_float].astype(float)
+        data[to_str] = data[to_str].astype(str)
+        data[to_date] = data[to_date].astype(str)
+        data = data[to_float + to_str + to_date]
+        data.to_parquet(os.path.join(local_data_path, 'processing', 'sinan_leivis', f'{it.split(".csv")[0]}.parquet'))
     return True
 
 
 def get_parquet_schema():
     import pyarrow.parquet as pq
-    import json
     local_data_path = '/usr/local/airflow/dags/data'
-    p = pq.read_table(os.path.join(local_data_path, 'processing', 'sinan_leivis', '2007_2020_leivis.parquet'))
-    schema = p.schema
-    schema = [dict(zip(["name", "type"], it)) for it in [it.split(": ") for it in str(schema).split('\n')][:75]]
-    _ = [it.update({'mode': 'NULLABLE'}) for it in schema]
-    schema = json.dumps(schema)
+    file = os.listdir(os.path.join(local_data_path, 'processing', 'sinan_leivis'))
+    file = [it for it in file if '.parquet' in it]
+    try:
+        p = pq.read_table(os.path.join(local_data_path, 'processing', 'sinan_leivis', file[0]))
+        schema = p.schema
+        schema = [dict(zip(["name", "type"], it)) for it in [it.split(": ") for it in str(schema).split('\n')][:75]]
+        _ = [it.update({'mode': 'NULLABLE'}) for it in schema]
+        for it in schema:
+            if it["type"] == 'double':
+                it["type"] = 'FLOAT64'
+    except:
+        return []
     return schema
 
 
@@ -129,13 +132,14 @@ def sync_local_to_blob(**kwargs):
     file = os.listdir(os.path.join(local_data_path, 'processing', 'sinan_leivis'))
     file = [it for it in file if '.parquet' in it]
 
-    GCSHook(
-        gcp_conn_id=GCP_CONN_ID
-    ).upload(
-        bucket_name=PROCESSING_BUCKET,
-        object_name=f'sinan_leivis/{file[0]}',
-        filename=f'{local_data_path}/processing/sinan_leivis/{file[0]}'
-    )
+    for it in file:
+        GCSHook(
+            gcp_conn_id=GCP_CONN_ID
+        ).upload(
+            bucket_name=PROCESSING_BUCKET,
+            object_name=f'sinan_leivis/{it}',
+            filename=f'{local_data_path}/processing/sinan_leivis/{it}'
+        )
     return True
 
 
@@ -220,12 +224,6 @@ list_processing_sinan_leivis = GCSListObjectsOperator(
     dag=dag
 )
 
-delete_local_sinan_leivis = PythonOperator(
-    task_id='delete_local_sinan_leivis',
-    python_callable=delete_local_data,
-    dag=dag
-)
-
 bq_create_dataset = BigQueryCreateEmptyDatasetOperator(
     task_id='bq_create_dataset',
     project_id=GCP_PROJECT_ID,
@@ -235,12 +233,13 @@ bq_create_dataset = BigQueryCreateEmptyDatasetOperator(
     dag=dag
 )
 
+schema = get_parquet_schema()
 bq_create_table = BigQueryCreateEmptyTableOperator(
     task_id='bq_create_table',
     project_id=GCP_PROJECT_ID,
     dataset_id=BQ_DATASET_NAME,
     table_id=BQ_SINAN_TABLE_NAME,
-    schema_fields=get_parquet_schema,
+    schema_fields=schema,
     location=LOCATION,
     gcp_conn_id=GCP_CONN_ID,
     dag=dag
@@ -252,7 +251,7 @@ ingest_processing_bucket_into_bq_table = GCSToBigQueryOperator(
     source_objects=['sinan_leivis/*.parquet'],
     destination_project_dataset_table=f'{GCP_PROJECT_ID}:{BQ_DATASET_NAME}.{BQ_SINAN_TABLE_NAME}',
     source_format='parquet',
-    create_disposition='CREATE_NEVER',
+    schema_fields=schema,
     write_disposition='WRITE_TRUNCATE',
     skip_leading_rows=1,
     autodetect=True,
@@ -263,9 +262,9 @@ ingest_processing_bucket_into_bq_table = GCSToBigQueryOperator(
 
 check_bq_table = BigQueryCheckOperator(
     task_id='check_bq_table',
-    sql="SELECT COUNT(*) FROM {BQ_DATASET_NAME}.{BQ_SINAN_TABLE_NAME}",
+    sql=f"SELECT COUNT(*) FROM {BQ_DATASET_NAME}.{BQ_SINAN_TABLE_NAME}",
     use_legacy_sql=False,
-    location='us',
+    location=LOCATION,
     gcp_conn_id=GCP_CONN_ID,
     dag=dag
 )
@@ -274,6 +273,11 @@ delete_processing_bucket = GCSDeleteBucketOperator(
     task_id='delete_processing_bucket',
     bucket_name=PROCESSING_BUCKET,
     gcp_conn_id=GCP_CONN_ID,
+    dag=dag
+)
+delete_local_sinan_leivis = PythonOperator(
+    task_id='delete_local_sinan_leivis',
+    python_callable=delete_local_data,
     dag=dag
 )
 
